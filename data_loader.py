@@ -109,7 +109,11 @@ class SRNDataset():
             rmin, rmax = rnz[[0, -1]]
             cmin, cmax = cnz[[0, -1]]
             bbox = np.array([cmin, rmin, cmax, rmax], dtype=np.float32)
-
+            
+            mask_indices = np.where(mask == 1.)
+            for col_indice in np.unique(mask_indices[0]):
+                row_indices = mask_indices[1][np.where(mask_indices[0] == col_indice)]
+                mask[col_indice, row_indices[0]:row_indices[-1]] = 1.
             all_imgs.append(img)
             all_masks.append(mask)
             all_poses.append(pose)

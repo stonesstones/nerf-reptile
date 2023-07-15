@@ -12,8 +12,8 @@ def config_parser():
                         default='./data/llff/fern', help='input data directory')
 
     # training options
-    parser.add_argument("--n_classes", type=int, default=100)
-    parser.add_argument("--n_inner_epochs", type=int, default=5,
+    parser.add_argument("--n_classes", type=int, default=10)
+    parser.add_argument("--n_inner_epochs", type=int, default=2,
                         help='training epochs')
     parser.add_argument("--n_outer_epochs", type=int, default=8,
                         help='training times')
