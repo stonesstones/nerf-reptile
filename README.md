@@ -3,8 +3,10 @@
 #### 実行環境
 pytorch  2.0.1+cu118
 #### download data
-以下のurlのcars_trainをダウンロードする。<br>
-https://drive.google.com/drive/folders/1IdOywOSLuK6WlkO5_h-ykr3ubeY9eDig
+以下のurlのsrn_cars.zipをダウンロードする。<br>
+https://drive.google.com/file/d/19yDsEJjx9zNpOKz9o6AaK-E8ED6taJWU/view?usp=drive_link
+
+[//]: # (https://drive.google.com/drive/folders/1IdOywOSLuK6WlkO5_h-ykr3ubeY9eDig)
 ### 1. train
 ```bash
 python train.py
