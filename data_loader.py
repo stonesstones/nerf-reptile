@@ -125,7 +125,7 @@ class SRNDataset():
             focal *= scale
             cx *= scale
             cy *= scale
-            all_bboxes *= scale
+            # all_bboxes *= scale
 
         # if all_imgs.shape[-3:-1] != self.image_size:
         #     scale = self.image_size[0] / all_imgs.shape[-2]

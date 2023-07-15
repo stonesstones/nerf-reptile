@@ -74,7 +74,9 @@ class pipeline():
 
     def train(self):
         images = self.data['images']
-        masks = np.repeat(self.data['masks'], 3, axis=-1)
+        masks = self.data['masks']
+        flatten_masks = masks.reshape(-1, 1)
+        flatten_masks_indices = np.where(flatten_masks == 1.0)
         H, W = images.shape[1:3]
         focal = self.data['focal']
         self._hwf = [int(H), int(W), focal]
@@ -82,20 +84,18 @@ class pipeline():
         poses = self.data['poses'][:,:3,:4]
         rays = [self.get_rays(H, W, focal, p) for p in poses[:, :3, :4]]
         rays = np.stack(rays, axis=0) # [batch, rays_o + rays_d, H, W, 3]
-        rays_rgb = np.concatenate([rays, images[:, None], masks[:, None]], axis=1)
-        rays_rgb = np.transpose(rays_rgb, [0,2,3,1,4]) # [N, H, W, ro+rd+rgb+masks, 3]
-        rays_rgb = np.reshape(rays_rgb, [-1,4,3]) # [N*H*W, ro+rd+rgb+masks, 3]
-        rays_rgb, masks = rays_rgb[:, :3], rays_rgb[:, 3]
-        rays_indices = np.where(masks == 1.0)[0]
-        rays_rgb = rays_rgb[rays_indices]
-        rays_rgb = 
-        rays_rgb = rays_rgb.astype(np.float32)
+        rays_rgb = np.concatenate([rays, images[:, None]], axis=1)
+        rays_rgb = np.transpose(rays_rgb, [0,2,3,1,4]) # [N, H, W, ro+rd+rgb, 3]
+        rays_rgb = np.reshape(rays_rgb, [-1,3,3]) # [N*H*W, ro+rd+rgb, 3]
+        rays_rgb = rays_rgb[flatten_masks_indices[0]].astype(np.float32) # for mask
+        # rays_rgb = rays_rgb.astype(np.float32)
 
         print('shuffle rays')
         np.random.shuffle(rays_rgb)
 
         images = torch.tensor(images, dtype=torch.float32).to(self.args.device)
         poses = torch.tensor(poses, dtype=torch.float32).to(self.args.device)
+        masks = torch.tensor(masks, dtype=torch.float32).to(self.args.device) # for mask
         rays_rgb = torch.tensor(rays_rgb, dtype=torch.float32).to(self.args.device)
         
         use_batching = not self.args.no_batching
@@ -112,7 +112,7 @@ class pipeline():
                 #Random over all images
                 batch = rays_rgb[i_batch:i_batch+self.args.N_rand] # [B, 2+1, 3]
                 batch = torch.transpose(batch, 0, 1)
-                batch_rays, target_s, batch_masks = batch[:2], batch[2], batch[3] # [ray_o + ray_d, B, 3], [1, N*H*W, 3] [1, N*H*W, 1]
+                batch_rays, target_s = batch[:2], batch[2], # [ray_o + ray_d, B, 3], [1, N*H*W, 3] [1, N*H*W, 1]
                 i_batch += self.args.N_rand
 
                 if i_batch >= rays_rgb.shape[0]:
@@ -123,7 +123,7 @@ class pipeline():
                     inner_epoch += 1
             else:
                 raise NotImplementedError
-            rgb, disp = self.render(H, W, focal, chunk=self.args.chunk, rays=batch_rays, masks=batch_masks)
+            rgb, disp = self.render(H, W, focal, chunk=self.args.chunk, rays=batch_rays)
 
             img_loss = self.img2mse(rgb, target_s)
             psnr = self.mse2psnr(img_loss)
@@ -139,30 +139,31 @@ class pipeline():
             scalar_logs = OrderedDict()
             histogram_logs = OrderedDict()
             image_logs = OrderedDict()
-            # if self.logger.should_record(self.args.i_weights):
-            #     self.logger.save_weights(self.models, self.logger.global_step)
-
-            # if self.logger.global_step < 10 or self.logger.should_record(self.args.i_print):
-            #     print("\n##############################################")
-            #     print(f"object id: {self.img_id}, global step: {self.logger.global_step}")
-            #     print('iter time {:.05f}'.format(dt))
-            #     if self.logger.should_record(self.args.i_print):
-            #         scalar_logs.update({
-            #             "train_loss": loss.item(),
-            #             "train_psnr": psnr.item(),
-            #         })
+            debug = False
+            if debug:
+                # if self.logger.should_record(self.args.i_weights):
+                #     self.logger.save_weights(self.models, self.logger.global_step)
+                if self.logger.global_step < 10 or self.logger.should_record(self.args.i_print):
+                    print("\n##############################################")
+                    print(f"object id: {self.img_id}, global step: {self.logger.global_step}")
+                    print('iter time {:.05f}'.format(dt))
+                    if self.logger.should_record(self.args.i_print):
+                        scalar_logs.update({
+                            "train_loss": loss.item(),
+                            "train_psnr": psnr.item(),
+                        })
+                    self.logger.add_scalars(scalar_logs)
 
                 # if self.logger.should_record(self.args.i_img) and not self.logger.global_step == 0:
             if inner_epoch == self.args.n_inner_epochs:
                 with torch.no_grad():
-                    print("\n##############################################")
                     # Log a rendered validation view to Tensorboard
                     img_i = np.random.choice(i_eval)
                     target_i = images[img_i]
+                    masks_i = masks[img_i] # for mask
                     pose_i = poses[img_i,:3,:4].cpu().numpy()
-                    rgb, disp = self.render(H, W, focal, chunk=self.args.chunk, c2w=pose_i)
+                    rgb, disp = self.render(H, W, focal, chunk=self.args.chunk, c2w=pose_i, masks=masks_i)
                     psnr = self.mse2psnr(self.img2mse(rgb, target_i))
-
                     image_logs.update({
                         'eval_rgb':self.to8b(rgb)[None],
                         'eval_disp':self.to8b(disp)[None],
@@ -175,10 +176,14 @@ class pipeline():
                 self.logger.flush()
             self.logger.add_global_step()
 
-    def render(self, H, W, focal, chunk, rays=None, ray_indices=None, c2w=None, use_viewdirs=False):
+    def render(self, H, W, focal, chunk, rays=None, masks=None, c2w=None, use_viewdirs=False):
         if c2w is not None:
             rays_o, rays_d = self.get_rays(H, W, focal, c2w)
             rays_o, rays_d = torch.tensor(rays_o).to(self.device), torch.tensor(rays_d).to(self.device)
+            if masks is not None:
+                masks = masks.reshape(-1, 1)
+                n_rays = masks.shape[0]
+                non_masks_indices = torch.where(masks == torch.tensor(1.))[0]
         else:
             rays_o, rays_d = rays
         
@@ -192,6 +197,9 @@ class pipeline():
         # create ray batch
         rays_o = torch.reshape(rays_o, [-1,3]).float()
         rays_d = torch.reshape(rays_d, [-1,3]).float()
+        if masks is not None:
+            rays_o = rays_o[non_masks_indices]
+            rays_d = rays_d[non_masks_indices]
         nears, fars = self.near * torch.ones_like(rays_d[...,:1]), self.far * torch.ones_like(rays_d[...,:1])
         pixel_area = torch.ones_like(rays_d[...,:1]) # for mip-nerf
 
@@ -205,13 +213,28 @@ class pipeline():
 
         # rendering
         weights = ray_samples_uniform.get_weights(field_outputs[FieldHeadNames.DENSITY])
-        rgb = self.renderer_rgb(
-                    rgb=field_outputs[FieldHeadNames.RGB],
-                    weights=weights,
-                )
-        disp = self.renderer_accumulation(
-                    weights=weights,
-                )
+
+        if masks is not None:
+            non_masks_indices = non_masks_indices.unsqueeze(-1).repeat(1, weights.shape[1]).reshape(-1)
+            rgb = self.renderer_rgb(
+                        rgb=field_outputs[FieldHeadNames.RGB].reshape(-1, 3),
+                        weights=weights.reshape(-1, 1),
+                        ray_indices=non_masks_indices,
+                        num_rays=n_rays
+                    )
+            disp = self.renderer_accumulation(
+                        weights=weights.reshape(-1, 1),
+                        ray_indices=non_masks_indices,
+                        num_rays=n_rays
+                    )
+        else:
+            rgb = self.renderer_rgb(
+                        rgb=field_outputs[FieldHeadNames.RGB],
+                        weights=weights,
+                    )
+            disp = self.renderer_accumulation(
+                        weights=weights,
+                    )
         
         rgb = torch.reshape(rgb, list(shape[:-1])+[3])
         disp = torch.reshape(disp, list(shape[:-1])+[1])
@@ -258,6 +281,7 @@ def main():
     for outer_epoch in range(args.n_outer_epochs):
         field_params = pipeline.get_initial_field_params()
         for k in range(clients):
+            print("\n##############################################")
             print("outer epoch: {}, client {}".format(outer_epoch, k))
             trainer = pipeline(k, train_dataset, loggers[k], device, args)
             if outer_epoch > 0:
