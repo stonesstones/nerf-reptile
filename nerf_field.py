@@ -1,22 +1,18 @@
 from typing import Dict, Optional, Tuple
 
 import torch
-from torch import Tensor, nn
-
+from jaxtyping import Float
 from nerfstudio.cameras.rays import RaySamples
-from nerfstudio.field_components.encodings import Encoding, Identity
-from nerfstudio.field_components.field_heads import (
-    DensityFieldHead,
-    FieldHead,
-    FieldHeadNames,
-    RGBFieldHead,
-)
+from nerfstudio.field_components.encodings import Encoding
+from nerfstudio.field_components.field_heads import (DensityFieldHead,
+                                                     FieldHead, FieldHeadNames,
+                                                     RGBFieldHead)
 from nerfstudio.field_components.mlp import MLP
 from nerfstudio.field_components.spatial_distortions import SpatialDistortion
 from nerfstudio.fields.base_field import Field
-from nerfstudio.field_components.encodings import NeRFEncoding
-from jaxtyping import Float
 from nerfstudio.utils.math import expected_sin
+from torch import Tensor, nn
+
 
 class NeRFEncoding(Encoding):
     """Multi-scale sinusoidal encodings. Support ``integrated positional encodings`` if covariances are provided.
@@ -80,6 +76,7 @@ class NeRFEncoding(Encoding):
             encoded_inputs = torch.cat([encoded_inputs, in_tensor], dim=-1)
         return encoded_inputs
 
+
 class NeRFField(Field):
     """NeRF Field
 
@@ -94,6 +91,7 @@ class NeRFField(Field):
         use_integrated_encoding: Used integrated samples as encoding input.
         spatial_distortion: Spatial distortion.
     """
+
     def __init__(
         self,
         base_mlp_num_layers: int = 8,
@@ -104,7 +102,7 @@ class NeRFField(Field):
         field_heads: Optional[Tuple[FieldHead]] = (RGBFieldHead(),),
         use_integrated_encoding: bool = False,
         spatial_distortion: Optional[SpatialDistortion] = None,
-        ) -> None:
+    ) -> None:
         super().__init__()
         self.position_encoding = NeRFField._get_encoding(use_dir=False)
         self.direction_encoding = NeRFField._get_encoding(use_dir=True)
@@ -133,14 +131,15 @@ class NeRFField(Field):
             field_head.set_in_dim(self.mlp_head.get_out_dim())  # type: ignore
 
     @staticmethod
-    def _get_encoding(in_dim=3, num_frequencies=6, min_freq_exp=0.0, max_freq_exp=8.0, include_input=True, use_dir=True):
+    def _get_encoding(in_dim=3, num_frequencies=6, min_freq_exp=0.0, max_freq_exp=5.0, include_input=True, use_dir=True):
         if use_dir:
             in_dim = 6
             num_frequencies = 4
+            max_freq_exp = 3.
             return NeRFEncoding(in_dim, num_frequencies, min_freq_exp, max_freq_exp, include_input)
         else:
             return NeRFEncoding(in_dim, num_frequencies, min_freq_exp, max_freq_exp, include_input)
-        
+
     def get_density(self, ray_samples: RaySamples) -> Tuple[Tensor, Tensor]:
         if self.use_integrated_encoding:
             gaussian_samples = ray_samples.frustums.get_gaussian_blob()

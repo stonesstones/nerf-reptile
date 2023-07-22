@@ -1,23 +1,16 @@
 import contextlib
-import math
 from typing import Generator, Literal, Optional, Union
 
 import nerfacc
 import torch
 from jaxtyping import Float, Int
-from torch import Tensor, nn
-from nerfacc import OccGridEstimator
-
-from nerfstudio.cameras.rays import Frustums, RayBundle, RaySamples
-from nerfstudio.utils import colors
-from nerfstudio.utils.math import components_from_spherical_harmonics, safe_normalize
-from abc import abstractmethod
-from typing import Callable, List, Optional, Protocol, Tuple, Union
-
 from nerfstudio.model_components.ray_samplers import SpacedSampler
+from nerfstudio.utils import colors
+from torch import Tensor, nn
 
 BackgroundColor = Union[Literal["random", "last_sample", "black", "white"], Float[Tensor, "3"]]
 BACKGROUND_COLOR_OVERRIDE: Optional[Float[Tensor, "3"]] = None
+
 
 @contextlib.contextmanager
 def background_color_override_context(mode: Float[Tensor, "3"]) -> Generator[None, None, None]:
@@ -119,6 +112,7 @@ class RGBRenderer(nn.Module):
             torch.clamp_(rgb, min=0.0, max=1.0)
         return rgb
 
+
 class AccumulationRenderer(nn.Module):
     """Accumulated value along a ray."""
 
@@ -148,6 +142,7 @@ class AccumulationRenderer(nn.Module):
         else:
             accumulation = torch.sum(weights, dim=-2)
         return accumulation
+
 
 class UniformSampler(SpacedSampler):
     """Sample uniformly along a ray

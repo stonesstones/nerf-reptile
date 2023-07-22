@@ -1,6 +1,4 @@
-
 def config_parser():
-
     import configargparse
     parser = configargparse.ArgumentParser()
     parser.add_argument('--config', is_config_file=True,
@@ -13,7 +11,7 @@ def config_parser():
 
     # training options
     parser.add_argument("--n_classes", type=int, default=10)
-    parser.add_argument("--n_inner_epochs", type=int, default=2,
+    parser.add_argument("--n_inner_epochs", type=int, default=5,
                         help='training epochs')
     parser.add_argument("--n_outer_epochs", type=int, default=8,
                         help='training times')
@@ -25,15 +23,15 @@ def config_parser():
                         default=8, help='layers in fine network')
     parser.add_argument("--netwidth_fine", type=int, default=256,
                         help='channels per layer in fine network')
-    parser.add_argument("--N_rand", type=int, default=32*32*4,
+    parser.add_argument("--N_rand", type=int, default=32 * 32 * 8,
                         help='batch size (number of random rays per gradient step)')
     parser.add_argument("--lrate", type=float,
                         default=5e-4, help='learning rate')
     parser.add_argument("--lrate_decay", type=int, default=250,
                         help='exponential learning rate decay (in 1000s)')
-    parser.add_argument("--chunk", type=int, default=1024*32,
+    parser.add_argument("--chunk", type=int, default=1024 * 32,
                         help='number of rays processed in parallel, decrease if running out of memory')
-    parser.add_argument("--netchunk", type=int, default=1024*64,
+    parser.add_argument("--netchunk", type=int, default=1024 * 64,
                         help='number of pts sent through network in parallel, decrease if running out of memory')
 
     # Disabled and not implemented for Neural Scene Graphs
@@ -56,7 +54,7 @@ def config_parser():
     parser.add_argument("--precrop_iters", type=int, default=0,
                         help='number of steps to train on central crops')
     parser.add_argument("--precrop_frac", type=float,
-                        default=.5, help='fraction of img taken for central crops')    
+                        default=.5, help='fraction of img taken for central crops')
 
     # rendering options
     parser.add_argument("--N_samples", type=int, default=64,
@@ -97,7 +95,7 @@ def config_parser():
 
     # dataset options
     parser.add_argument("--dataset_type", type=str, default='srn',
-                        help='options: srn / llff / blender / deepvoxels / vkitti') #use    
+                        help='options: srn / llff / blender / deepvoxels / vkitti')  # use
     parser.add_argument("--testskip", type=int, default=8,
                         help='will load 1/N images from test/val sets, useful for large datasets like deepvoxels')
     parser.add_argument("--half_res", action='store_true',
@@ -126,9 +124,9 @@ def config_parser():
                         help='specifies the distance from the last pose to the far plane')
 
     # logging/saving options
-    parser.add_argument("--i_print",   type=int, default=100,
+    parser.add_argument("--i_print", type=int, default=100,
                         help='frequency of console printout and metric loggin')
-    parser.add_argument("--i_img",     type=int, default=500,
+    parser.add_argument("--i_img", type=int, default=500,
                         help='frequency of tensorboard image logging')
     parser.add_argument("--i_weights", type=int, default=10000,
                         help='frequency of weight ckpt saving')

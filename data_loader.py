@@ -1,10 +1,9 @@
-import os
 import glob
-import torch
-import torch.nn.functional as F
-import numpy as np
+import os
+
 import imageio.v3 as iio
-# from util import transform_img_uint8_to_float
+import numpy as np
+
 
 class Dataloader():
     def __init__(self, args):
@@ -16,14 +15,14 @@ class Dataloader():
             self.data = SRNDataset
         else:
             raise NotImplementedError("Unsupported dataset type", self.dataset_type)
-    
+
     def get_data(self, stage="train"):
         if self.stage == "train":
             train_data = self.data(self.data_dir, stage=stage)
             return train_data
         elif self.stage == "test":
             test_data = self.data(self.data_dir, stage=stage)
-            return test_data            
+            return test_data
         else:
             raise NotImplementedError("Unsupported stage", self.stage)
 
@@ -90,17 +89,31 @@ class SRNDataset():
         all_poses = []
         all_masks = []
         all_bboxes = []
+        index_3dbb = [None, None, None]
+        max_xyz = [0, 0, 0]
+        index = 0
         for rgb_path, pose_path in zip(rgb_paths, pose_paths):
             img = iio.imread(rgb_path)[..., :3]
             img = transform_img_uint8_to_float(img)
             mask = (img != 1.).all(axis=-1)[..., None].astype(np.float32)
 
             pose = np.loadtxt(pose_path, dtype=np.float32).reshape(4, 4)
-            pose = pose @ self._coord_trans #何をしている
 
-            rows = np.any(mask, axis=1) #白の背景を除く
+            pose = pose @ self._coord_trans  # 何をしている
+            new_x, new_y, new_z = np.abs(pose[:3, 3])
+            if new_x > max_xyz[0]:
+                index_3dbb[0] = index
+                max_xyz[0] = new_x
+            elif new_y > max_xyz[1]:
+                index_3dbb[1] = index
+                max_xyz[1] = new_y
+            elif new_z > max_xyz[2]:
+                index_3dbb[2] = index
+                max_xyz[2] = new_z
+            index += 1
+            rows = np.any(mask, axis=1)  # 白の背景を除く
             cols = np.any(mask, axis=0)
-            rnz = np.where(rows)[0] #マスクされていない最初の行
+            rnz = np.where(rows)[0]  # マスクされていない最初の行
             cnz = np.where(cols)[0]
             if len(rnz) == 0:
                 raise RuntimeError(
@@ -109,7 +122,7 @@ class SRNDataset():
             rmin, rmax = rnz[[0, -1]]
             cmin, cmax = cnz[[0, -1]]
             bbox = np.array([cmin, rmin, cmax, rmax], dtype=np.float32)
-            
+
             mask_indices = np.where(mask == 1.)
             for col_indice in np.unique(mask_indices[0]):
                 row_indices = mask_indices[1][np.where(mask_indices[0] == col_indice)]
@@ -129,7 +142,20 @@ class SRNDataset():
             focal *= scale
             cx *= scale
             cy *= scale
-            # all_bboxes *= scale
+
+        # index_3dbb [x, y, z]の軸上にある画像のインデックス
+        # radius = np.max(np.linalg.norm(all_poses[index_3dbb][:, :3, 3], ord=2, axis=1))
+        for index, image_index in enumerate(index_3dbb):
+            two_d_bb = all_bboxes[image_index]
+            if index == 0:
+                dx = two_d_bb[2] - two_d_bb[0]
+                hx = two_d_bb[3] - two_d_bb[1]
+            elif index == 1:
+                wy = two_d_bb[2] - two_d_bb[0]
+                hy = two_d_bb[3] - two_d_bb[1]
+            elif index == 2:
+                pass
+        wdh = np.array([wy * (hx / hy), dx, hx], dtype=np.float32) / focal
 
         # if all_imgs.shape[-3:-1] != self.image_size:
         #     scale = self.image_size[0] / all_imgs.shape[-2]
@@ -155,6 +181,7 @@ class SRNDataset():
             "masks": all_masks,
             "bbox": all_bboxes,
             "poses": all_poses,
+            "wdh3dbb": wdh * 1.2,
         }
         return result
 
@@ -162,6 +189,7 @@ class SRNDataset():
 def transform_img_uint8_to_float(img):
     img = img.astype(np.float32) / 255.0
     return img
+
 
 if "__main__" == __name__:
     from args_parser import config_parser
