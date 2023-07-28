@@ -340,7 +340,7 @@ def main():
 
         torch.save(server_field_params, os.path.join(base_dir, f"server_field_params{outer_epoch}.pth"))
         print("\n##############################################")
-        print("\noutput server rgb")
+        print("output server rgb")
         server = pipeline(0, train_dataset, logger=None, device=device, args=args)
         server.load_field_params(server_field_params)
         server_logs = OrderedDict()
