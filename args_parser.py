@@ -11,7 +11,7 @@ def config_parser():
 
     # training options
     parser.add_argument("--n_classes", type=int, default=10)
-    parser.add_argument("--n_inner_epochs", type=int, default=5,
+    parser.add_argument("--n_inner_epochs", type=int, default=3,
                         help='training epochs')
     parser.add_argument("--n_outer_epochs", type=int, default=8,
                         help='training times')
