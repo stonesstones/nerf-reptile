@@ -29,6 +29,10 @@ class pipeline():
         self.far = dataset.z_far
         self.num_coarse_samples = args.N_samples
         self.logger = logger
+        images = self.data['images']
+        H, W = images.shape[1:3]
+        focal = self.data['focal']
+        self._hwf = [int(H), int(W), focal]
         self._build_models()
 
     def _build_models(self, restore=False):
@@ -53,18 +57,25 @@ class pipeline():
         pass
 
     def get_field_params(self):
-        return self.field.mlp_base.state_dict()
+        return self.field.state_dict()
 
     @staticmethod
     def get_initial_field_params():
         field = NeRFField(4, 128, 4, 128, (4,))
-        field_state_dict = field.mlp_base.state_dict()
-        for key in field_state_dict:
-            nn.init.zeros_(field_state_dict[key])
-        return field_state_dict
+        all_state_dict = field.state_dict()
+        for key in list(all_state_dict):
+            nn.init.zeros_(all_state_dict[key])
+        return all_state_dict
 
     def load_field_params(self, state_dict):
-        self.field.mlp_base.load_state_dict(state_dict)
+        mlp_base_state_dict = {}
+        for key in list(state_dict)[:8]:
+            new_key = ".".join(key.split(".")[1:])
+            mlp_base_state_dict[new_key] = state_dict[key]
+        self.field.mlp_base.load_state_dict(mlp_base_state_dict)
+
+    def load_all_params(self, all_state_dict):
+        self.field.load_state_dict(all_state_dict)
 
     def get_rays(self, H, W, focal, c2w):
         """Get ray origins, directions from a pinhole camera.
@@ -82,7 +93,7 @@ class pipeline():
         dim = self.data["wdh3dbb"]
         H, W = images.shape[1:3]
         focal = self.data['focal']
-        self._hwf = [int(H), int(W), focal]
+        # self._hwf = [int(H), int(W), focal]
         i_eval = np.arange(images.shape[0])
         poses = self.data['poses'][:, :3, :4]
         rays = [self.get_rays(H, W, focal, p) for p in poses[:, :3, :4]]
@@ -228,6 +239,57 @@ class pipeline():
         disp = torch.reshape(disp, list(shape[:-1]) + [1])
         return rgb, disp
 
+    def server_render(self, img_i=0, use_viewdirs=False):
+        H, W, focal = self._hwf
+        dim = self.data["wdh3dbb"]
+        c2w = np.array(self.data["poses"][img_i, :3, :4])
+        rays_o, rays_d = self.get_rays(H, W, focal, c2w)
+        rays_o, rays_d = torch.tensor(rays_o).to(self.device), torch.tensor(rays_d).to(self.device)
+        dim = torch.tensor(dim, dtype=torch.float32).to(self.device)
+        if use_viewdirs:
+            viewdirs = rays_d
+            viewdirs = viewdirs / torch.norm(viewdirs, dim=-1, keepdim=True)
+            viewdirs = torch.reshape(viewdirs, [-1, 3]).float()
+
+        shape = rays_d.shape
+
+        # create ray batch
+        rays_o = torch.reshape(rays_o, [-1, 3]).float()
+        rays_d = torch.reshape(rays_d, [-1, 3]).float()
+        pts_o_o, pts_box_in_w, viewdirs_box_w, z_vals_in_w, z_vals_out_w,\
+            pts_box_in_o, viewdirs_box_o, z_vals_in_o, z_vals_out_o, \
+            intersection_map = box_pts(rays_o, rays_d, dim=dim)
+        nears, fars = z_vals_in_o[..., None] * torch.ones_like(rays_d[..., :1][intersection_map]), z_vals_out_o[..., None] * torch.ones_like(rays_d[..., :1][intersection_map])
+        pixel_area = torch.ones_like(rays_d[..., :1][intersection_map])  # for mip-nerf
+
+        # sampling
+        ray_bundle = RayBundle(origins=pts_o_o, directions=viewdirs_box_o, pixel_area=pixel_area, nears=nears, fars=fars)
+        sampler_uniform = UniformSampler(num_samples=self.num_coarse_samples)
+        ray_samples_uniform = sampler_uniform(ray_bundle)
+
+        # get field representation
+        field_outputs = self.field(ray_samples_uniform)
+
+        # rendering
+        weights = ray_samples_uniform.get_weights(field_outputs[FieldHeadNames.DENSITY])
+
+        num_rays = rays_o.shape[0]
+        ray_indices = intersection_map[0].unsqueeze(-1).repeat(1, weights.shape[1]).reshape(-1)
+        rgb = self.renderer_rgb(
+            rgb=field_outputs[FieldHeadNames.RGB].reshape(-1, 3),
+            weights=weights.reshape(-1, 1),
+            ray_indices=ray_indices,
+            num_rays=num_rays
+        )
+        disp = self.renderer_accumulation(
+            weights=weights.reshape(-1, 1),
+            ray_indices=ray_indices,
+            num_rays=num_rays
+        )
+        rgb = torch.reshape(rgb, list(shape[:-1]) + [3])
+        disp = torch.reshape(disp, list(shape[:-1]) + [1])
+        return rgb, disp
+
 
 def main():
     args = config_parser().parse_args()
@@ -249,7 +311,7 @@ def main():
     os.makedirs(base_dir, exist_ok=True)
 
     clients = args.n_classes if len(train_dataset) >= args.n_classes else len(train_dataset)
-
+    server_logger = Logger(base_dir, global_step=0)
     # for logger
     loggers = []
     for k in range(clients):
@@ -267,15 +329,35 @@ def main():
             print("outer epoch: {}, client {}".format(outer_epoch, k))
             trainer = pipeline(k, train_dataset, loggers[k], device, args)
             if outer_epoch > 0:
-                trainer.load_field_params(server_field_params)
+                # trainer.load_field_params(server_field_params)
+                trainer.load_all_params(server_field_params)
             trainer.train()
             loggers[k].add_outer_epoch()
             tmp_field_params = trainer.get_field_params()
-            for key in field_params:
+            for key in list(field_params):
                 field_params[key] += tmp_field_params[key].cpu() / clients
         server_field_params = field_params
 
         torch.save(server_field_params, os.path.join(base_dir, f"server_field_params{outer_epoch}.pth"))
+        print("\n##############################################")
+        print("\noutput server rgb")
+        server = pipeline(0, train_dataset, logger=None, device=device, args=args)
+        server.load_field_params(server_field_params)
+        server_logs = OrderedDict()
+        with torch.no_grad():
+            loaded_field_rgb, loaded_field_disp = server.server_render()
+        server.load_all_params(server_field_params)
+        with torch.no_grad():
+            loaded_all_rgb, loaded_all_disp = server.server_render()
+        rgb = torch.cat([loaded_field_rgb, loaded_all_rgb], dim=1)
+        disp = torch.cat([loaded_field_disp, loaded_all_disp], dim=1)
+        server_logs.update({
+            'server_rgb': to8b(rgb)[None],
+            'server_disp': to8b(disp)[None],
+        })
+        server_logger.add_images(server_logs, server_logger.outer_epoch)
+        server_logger.flush()
+        server_logger.add_outer_epoch()
 
 
 if __name__ == '__main__':
