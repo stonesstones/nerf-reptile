@@ -6,6 +6,10 @@ def config_parser():
     parser.add_argument("--expname", type=str, help='experiment name')
     parser.add_argument("--basedir", type=str, default='./logs/',
                         help='where to store ckpts and logs')
+    parser.add_argument("--restore_path", type=str, default='',
+                        help='where to restore ckpts')
+    parser.add_argument("--eval_only", action='store_true',
+                        help='eval only (neede restore_path)')
     parser.add_argument("--datadir", type=str,
                         default='./data/llff/fern', help='input data directory')
 
@@ -13,6 +17,7 @@ def config_parser():
     parser.add_argument("--n_classes", type=int, default=10)
     parser.add_argument("--n_inner_epochs", type=int, default=3,
                         help='training epochs')
+    parser.add_argument("--n_eval_inner_epochs", type=int, default=20, help='eval training epochs')
     parser.add_argument("--n_outer_epochs", type=int, default=8,
                         help='training times')
     parser.add_argument("--netdepth", type=int, default=8,

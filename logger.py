@@ -29,7 +29,7 @@ class Logger:
             global_step = self.global_step
         for key, value in scalar_dict.items():
             print('{}: {}'.format(key, value))
-            self._writer.add_histogram(f"{key}", value, global_step=global_step)
+            self._writer.add_histogram(f"{key}", value, global_step=global_step, bins='auto')
 
     def add_images(self, image_dict, global_step=None):
         if global_step is None:

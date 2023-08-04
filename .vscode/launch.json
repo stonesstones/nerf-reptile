@@ -26,5 +26,18 @@
                 "--dataset_type=srn",
             ]
         },
+        {
+            "name": "debug: eval train",
+            "type": "python",
+            "request": "launch",
+            "program": "train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "args": [
+                "--dataset_type=srn",
+                "--restore_path=/home/atsuya/tier4/nerf-reptile/logs/test/server_field_params7.pth",
+                "--eval_only"
+            ]
+        },
     ]
 }
